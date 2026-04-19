@@ -1,0 +1,49 @@
+name: Node.js Package
+
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code #1
+        uses: actions/checkout@v2
+
+      - name: Set up Node 20 #2
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies #3
+        run: npm install
+
+      - name: Build React app #4
+        run: npm run build
+
+      - name: Archive the build folder #5
+        run: zip -r deploy.zip build package.json package-lock.json
+
+      - name: Deploy to EC2
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > server.pem
+          chmod 600 server.pem
+          
+          echo "### Uploading Build file to EC2 server..."
+          scp -i server.pem -o StrictHostKeyChecking=no deploy.zip ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:/home/ubuntu/frontend/
+          
+          echo "### Deploying the new version on EC2..."
+          ssh -i server.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd /home/ubuntu/frontend
+            echo "### Unzipping the deploy.zip file..."
+            unzip -o deploy.zip
+            
+            echo "### Killing any running http-server instances..."
+            pkill -f "npx http-server" || echo "No existing http-server processes running."
+
+            echo "### Running the application..."
+            nohup npx http-server build &>/dev/null &
+            echo "### Application is running!"
+          EOF
